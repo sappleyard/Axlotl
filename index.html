@@ -117,6 +117,8 @@ let queue = store.get("queue", []);          // pending uploads: {op:'add',recor
 let collector = store.get("collector", "");
 let fix = null, gpsErr = null, watchId = null;
 let sending = false, lastError = "", sheetRows = null;
+let inFlight = new Set();      // ops currently being uploaded
+let batchOk = null;           // does the sheet script accept batches? (null = not known yet)
 let lastSavedId = null, toastTimer = null;
 
 /* ---------- questions ---------- */
@@ -259,7 +261,7 @@ $("undo").addEventListener("click", () => {
   if (!id) return;
   hideToast();
   const i = queue.findIndex((o) => o.op === "add" && o.record.id === id);
-  if (i > 0 || (i === 0 && !sending)) queue.splice(i, 1);   // never uploaded: just drop it
+  if (i >= 0 && !inFlight.has(queue[i])) queue.splice(i, 1); // never uploaded: just drop it
   else queue.push({ op: "delete", id });                      // already (or being) uploaded: delete the row
   store.set("queue", queue);
   bumpCount(-1);
@@ -270,7 +272,7 @@ $("undo").addEventListener("click", () => {
 async function send(op) {
   if (!navigator.onLine) return { ok: false, error: "offline" };
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20000);
+  const timer = setTimeout(() => ctrl.abort(), op.op === "batch" ? 60000 : 20000);
   try {
     // Plain-text body keeps this a "simple" request, which Apps Script accepts cross-origin.
     const r = await fetch(SCRIPT_URL.trim(), { method: "POST", body: JSON.stringify(op), signal: ctrl.signal });
@@ -287,14 +289,20 @@ async function flush() {
   sending = true; renderSync();
   try {
     while (queue.length) {
-      const op = queue[0];
-      const res = await send(op);
+      // A backlog goes up in one request (up to 100 at a time); a single entry goes on its own.
+      const useBatch = queue.length > 1 && batchOk !== false;
+      const ops = useBatch ? queue.slice(0, 100) : [queue[0]];
+      ops.forEach((o) => inFlight.add(o));
+      const res = await send(useBatch ? { op: "batch", ops } : ops[0]);
+      ops.forEach((o) => inFlight.delete(o));
+      if (useBatch && !res.ok && /Unknown operation/.test(res.error || "")) { batchOk = false; continue; } // older script: go one by one
       if (!res.ok) { lastError = res.error; break; }
+      if (useBatch) batchOk = true;
       lastError = "";
       if (res.rows != null) sheetRows = res.rows;
-      const j = queue.indexOf(op);
-      if (j >= 0) queue.splice(j, 1);
+      ops.forEach((o) => { const j = queue.indexOf(o); if (j >= 0) queue.splice(j, 1); });
       store.set("queue", queue);
+      renderSync();
     }
   } finally {
     sending = false; renderSync();
@@ -313,7 +321,7 @@ function renderSync() {
   const n = queue.length, s = $("sync");
   $("cfgWarn").hidden = configured;
   if (!configured) { s.textContent = n ? `${n} saved on this phone` : ""; return; }
-  if (sending) s.textContent = `Uploading ${n}…`;
+  if (sending) s.textContent = n ? `Uploading… ${n} left` : "Uploading…";
   else if (!n && lastError) s.textContent = lastError === "offline" ? "Offline" : lastError;
   else if (!n) s.textContent = "All synced" + (sheetRows != null ? ` · ${sheetRows} in sheet` : "");
   else if (lastError === "offline") s.textContent = `Offline · ${n} waiting, will upload automatically`;
