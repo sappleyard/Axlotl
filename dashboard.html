@@ -128,6 +128,8 @@ td.y::before{background:var(--yes)} td.n::before{background:var(--no)}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface);color:var(--ink);box-shadow:0 4px 18px rgba(0,0,0,.25)}
 .leaflet-popup-content{margin:12px 14px;font:13px/1.45 var(--sans)}
 .leaflet-container a.leaflet-popup-close-button{color:var(--muted)}
+.dark-tiles .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.6)}
+.leaflet-tile-pane{filter:saturate(.75)}
 .leaflet-control-attribution{background:color-mix(in srgb,var(--surface) 85%,transparent)!important;color:var(--muted)!important}
 .leaflet-control-attribution a{color:var(--ink-2)!important}
 .leaflet-bar a{background:var(--surface);color:var(--ink);border-color:var(--line)}
@@ -233,10 +235,12 @@ const dark = () => document.documentElement.dataset.theme === "dark" ||
   (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
 function setTiles() {
   if (tiles) map.removeLayer(tiles);
-  tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark() ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-    maxZoom: 20, subdomains: "abcd",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  // OpenStreetMap tiles: free, no API key. In dark mode the tiles are inverted with a CSS filter.
+  tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
+  map.getContainer().classList.toggle("dark-tiles", dark());
 }
 function initMap() {
   map = L.map("map", { zoomControl: true, attributionControl: true }).setView([37.4419, -122.143], 13);
